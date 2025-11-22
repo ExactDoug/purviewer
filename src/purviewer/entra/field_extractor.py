@@ -109,9 +109,28 @@ class EntraFieldExtractor:
         return df
 
     def _normalize_risk_fields(self, df: DataFrame) -> DataFrame:
-        """Normalize risk level fields to consistent values."""
-        if "riskLevel" in df.columns:
-            df["riskLevel"] = df["riskLevel"].fillna("none").astype(str).str.lower()
+        """Normalize risk level fields to consistent values.
+
+        Real Entra ID exports use riskLevelDuringSignIn and riskLevelAggregated
+        instead of a simple riskLevel field.
+        """
+        # Create riskLevel from real Entra ID fields if not present
+        if "riskLevel" not in df.columns:
+            if "riskLevelDuringSignIn" in df.columns:
+                df["riskLevel"] = df["riskLevelDuringSignIn"]
+            elif "riskLevelAggregated" in df.columns:
+                df["riskLevel"] = df["riskLevelAggregated"]
+            else:
+                df["riskLevel"] = "none"
+
+        # Normalize to lowercase, replace 'hidden' with 'none'
+        df["riskLevel"] = (
+            df["riskLevel"]
+            .fillna("none")
+            .astype(str)
+            .str.lower()
+            .replace("hidden", "none")
+        )
 
         if "riskState" in df.columns:
             df["riskState"] = df["riskState"].fillna("none").astype(str).str.lower()

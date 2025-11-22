@@ -362,9 +362,8 @@ class EntraReportGenerator:
                 "operating_systems": baseline.operating_systems,
                 "browsers": baseline.browsers,
                 "client_apps": baseline.client_apps,
-                "risk_levels": baseline.risk_levels,
-                "first_seen": str(baseline.first_seen) if baseline.first_seen else None,
-                "last_seen": str(baseline.last_seen) if baseline.last_seen else None,
+                "typical_hours": baseline.typical_hours,
+                "device_ids": baseline.device_ids[:10],
             }
 
         # Impossible travel anomalies
