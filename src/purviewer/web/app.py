@@ -180,5 +180,4 @@ def launch_app(port: int = 7860, share: bool = False) -> None:
         # Security settings
         allowed_paths=["/data"],
         blocked_paths=["/home", "/root", "/etc", "/var", "/proc", "/sys"],
-        show_api=False,  # Disable API docs in production
     )
