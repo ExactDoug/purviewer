@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,12 @@ class AnalysisHandler:
     def __init__(self) -> None:
         """Initialize the analysis handler."""
         self.logger = PolyLog.get_logger(simple=True)
-        self._temp_dir = tempfile.mkdtemp(prefix="purviewer_")
+        # Use /data in container (from env var), fallback to temp for development
+        data_dir = os.environ.get("PURVIEWER_DATA_DIR", "")
+        if data_dir and os.path.exists(data_dir):
+            self._temp_dir = tempfile.mkdtemp(prefix="analysis_", dir=data_dir)
+        else:
+            self._temp_dir = tempfile.mkdtemp(prefix="purviewer_")
 
     def analyze(
         self,

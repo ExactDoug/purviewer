@@ -1,0 +1,45 @@
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+
+# Development
+.venv/
+venv/
+*.md
+!README.md
+docs/
+tests/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Secrets (never include)
+.env
+*.key
+*.pem
+credentials.*
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+docker/
+
+# Project specific
+.claude_queue.json
+.orchestration/
+poetry.lock
