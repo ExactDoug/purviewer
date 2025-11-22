@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from polykit.log import Loggable
+from polykit import PolyLog
 
 from purviewer.entra import (
     EntraAnomalyAnalyzer,
@@ -18,12 +18,12 @@ from purviewer.entra import (
 )
 
 
-class AnalysisHandler(Loggable):
+class AnalysisHandler:
     """Handle analysis requests from the web interface."""
 
     def __init__(self) -> None:
         """Initialize the analysis handler."""
-        super().__init__()
+        self.logger = PolyLog.get_logger(simple=True)
         self._temp_dir = tempfile.mkdtemp(prefix="purviewer_")
 
     def analyze(

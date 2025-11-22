@@ -46,7 +46,6 @@ def create_app() -> gr.Blocks:
     # Create the interface
     with gr.Blocks(
         title="Purviewer - Entra Sign-In Analysis",
-        theme=gr.themes.Soft(),
     ) as app:
         gr.Markdown(
             """
