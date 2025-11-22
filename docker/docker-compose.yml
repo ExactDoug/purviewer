@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  purviewer:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: purviewer-web
+    restart: unless-stopped
+
+    # Security: Drop all capabilities
+    cap_drop:
+      - ALL
+
+    # Security: Read-only root filesystem
+    read_only: true
+
+    # Security: No privilege escalation
+    security_opt:
+      - no-new-privileges:true
+
+    # Writable directories (tmpfs for security)
+    tmpfs:
+      - /tmp:noexec,nosuid,size=512m
+
+    # Persistent data volume (named volume - handles userns-remap automatically)
+    volumes:
+      - purviewer_data:/data
+
+    # Environment variables
+    env_file:
+      - .env
+
+    # Use existing isolated-services network (same as actual-budget, ejbca, caddy)
+    networks:
+      - isolated-services
+
+    # Resource limits (fits within dh01's 4.1GB RAM)
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:7860/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+# Use existing external network
+networks:
+  isolated-services:
+    external: true
+
+# Named volume (automatically gets correct userns-remap ownership)
+volumes:
+  purviewer_data:
+    driver: local

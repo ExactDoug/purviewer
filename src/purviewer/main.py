@@ -19,7 +19,7 @@ from polykit import PolyLog, Text
 from polykit.cli import PolyArgs
 from polykit.text import color, print_color
 
-from purviewer.entra import EntraSignInOperations
+from purviewer.entra import EntraAnomalyAnalyzer, EntraSignInOperations
 from purviewer.exchange import ExchangeOperations
 from purviewer.files import FileOperations
 from purviewer.network import NetworkOperations
@@ -51,8 +51,12 @@ def parse_arguments() -> argparse.Namespace:
         arg_width=40,
     )
 
-    # Positional argument for the audit CSV file
-    parser.add_argument("log_csv", help="CSV audit log from Purview (or Entra ID for --entra)")
+    # Positional argument for the audit CSV file (optional when using --web)
+    parser.add_argument(
+        "log_csv",
+        nargs="?",
+        help="CSV audit log from Purview (or Entra ID for --entra)",
+    )
 
     # SharePoint/Exchange analysis mode from Purview audit log
     purview_group = parser.add_argument_group(
@@ -159,6 +163,40 @@ def parse_arguments() -> argparse.Namespace:
         help="analyze sign-in data from an Entra ID CSV audit log",
     )
     entra_group.add_argument(
+        "--entra-anomalies",
+        action="store_true",
+        help="run anomaly detection on Entra sign-in data (JSON or CSV)",
+    )
+    entra_group.add_argument(
+        "--entra-user",
+        type=str,
+        help="analyze specific user for anomaly detection",
+        metavar="USER_EMAIL",
+    )
+    entra_group.add_argument(
+        "--entra-report-md",
+        type=str,
+        help="generate markdown incident report",
+        metavar="OUTPUT_FILE",
+    )
+    entra_group.add_argument(
+        "--entra-export-anomalies",
+        type=str,
+        help="export detected anomalies to CSV",
+        metavar="OUTPUT_FILE",
+    )
+    entra_group.add_argument(
+        "--entra-ml-detect",
+        action="store_true",
+        help="enable ML-based anomaly detection (Isolation Forest)",
+    )
+    entra_group.add_argument(
+        "--entra-report-json",
+        type=str,
+        help="generate JSON report for programmatic consumption",
+        metavar="OUTPUT_FILE",
+    )
+    entra_group.add_argument(
         "--filter",
         type=str,
         help="filter sign-ins by specified text (case-insensitive)",
@@ -177,12 +215,52 @@ def parse_arguments() -> argparse.Namespace:
         metavar="MAX_ROWS",
     )
 
+    # Web interface
+    web_group = parser.add_argument_group(
+        "WEB INTERFACE",
+        "Launch Gradio web interface for sign-in analysis",
+    )
+    web_group.add_argument(
+        "--web",
+        action="store_true",
+        help="launch Gradio web interface for Entra sign-in analysis",
+    )
+    web_group.add_argument(
+        "--web-port",
+        type=int,
+        default=7860,
+        help="port for web interface (default: 7860)",
+        metavar="PORT",
+    )
+    web_group.add_argument(
+        "--web-share",
+        action="store_true",
+        help="create a public share link for the web interface",
+    )
+
     args = parser.parse_args()
 
-    # Validate that sign-in options are only used with --entra
+    # Validate that log_csv is required unless using --web
+    if not args.web and not args.log_csv:
+        parser.error("log_csv is required unless using --web")
+
+    # Validate that sign-in options are only used with --entra or --entra-anomalies
     signin_options = [args.filter, args.exclude, args.limit]
-    if any(opt is not None for opt in signin_options) and not args.entra:
-        parser.error("Sign-in options (--filter, --exclude, --limit) can only be used with --entra")
+    entra_mode = args.entra or args.entra_anomalies
+    if any(opt is not None for opt in signin_options) and not entra_mode:
+        parser.error("Sign-in options (--filter, --exclude, --limit) can only be used with --entra or --entra-anomalies")
+
+    # Validate anomaly-specific options
+    anomaly_options = [
+        args.entra_user,
+        args.entra_report_md,
+        args.entra_export_anomalies,
+        args.entra_ml_detect,
+        args.entra_report_json,
+    ]
+    anomaly_option_names = "--entra-user, --entra-report-md, --entra-export-anomalies, --entra-ml-detect, --entra-report-json"
+    if any(opt for opt in anomaly_options) and not args.entra_anomalies:
+        parser.error(f"Anomaly options ({anomaly_option_names}) require --entra-anomalies")
 
     return args
 
@@ -518,10 +596,45 @@ def main() -> None:
     # Parse command-line arguments
     args = parse_arguments()
 
+    # Handle web interface launch
+    if args.web:
+        from purviewer.web import launch_app
+        print_color("Launching Gradio web interface...", "green")
+        launch_app(port=args.web_port, share=args.web_share)
+        return
+
     config.user_mapping = users.create_user_mapping(args.user_map)
 
     log_file = Path(args.log_csv)
     print(color("Using log file: ", "green") + str(log_file))
+
+    # Handle Entra anomaly detection
+    if args.entra_anomalies:
+        try:
+            analyzer = EntraAnomalyAnalyzer(logger, enable_ml=args.entra_ml_detect)
+            analyzer.analyze(
+                args.log_csv,
+                user=args.entra_user,
+                filter_text=args.filter,
+                exclude_text=args.exclude,
+            )
+
+            # Print summary
+            analyzer.print_summary()
+
+            # Generate reports if requested
+            if args.entra_report_md:
+                analyzer.generate_report(args.entra_report_md, user=args.entra_user)
+
+            if args.entra_report_json:
+                analyzer.generate_json_report(args.entra_report_json, user=args.entra_user)
+
+            if args.entra_export_anomalies:
+                analyzer.export_anomalies(args.entra_export_anomalies)
+
+        except (ValueError, FileNotFoundError) as e:
+            logger.error("Anomaly analysis failed: %s", str(e))
+        return
 
     # Handle Entra sign-in analysis early, before trying to process as SharePoint audit log
     if args.entra:
