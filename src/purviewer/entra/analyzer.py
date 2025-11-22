@@ -6,7 +6,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from pandas import DataFrame
 
 from purviewer.entra.baseline import BaselineCalculator, UserBaseline
 from purviewer.entra.data_loader import EntraDataLoader
@@ -24,8 +26,6 @@ from purviewer.entra.reporting import EntraReportGenerator
 if TYPE_CHECKING:
     from logging import Logger
 
-    from pandas import DataFrame
-
     from purviewer.entra.detectors.failure_spike import FailureSpike
     from purviewer.entra.detectors.impossible_travel import TravelAnomaly
     from purviewer.entra.detectors.new_device import DeviceAnomaly
@@ -36,12 +36,22 @@ if TYPE_CHECKING:
 class EntraAnomalyAnalyzer:
     """Main analyzer for Entra sign-in anomaly detection."""
 
-    def __init__(self, logger: Logger, enable_ml: bool = False) -> None:
+    def __init__(
+        self,
+        logger: Logger,
+        enable_ml: bool = False,
+        max_speed_kmh: int = 900,
+        z_score_threshold: float = 3.0,
+        geoip_db_path: str | Path | None = None,
+    ) -> None:
         """Initialize the analyzer with all components.
 
         Args:
             logger: Logger instance.
             enable_ml: Enable ML-based anomaly detection.
+            max_speed_kmh: Maximum realistic travel speed for impossible travel detection.
+            z_score_threshold: Z-score threshold for failure spike detection.
+            geoip_db_path: Optional path to MaxMind GeoLite2 database.
         """
         self.logger = logger
         self._enable_ml = enable_ml
@@ -50,10 +60,14 @@ class EntraAnomalyAnalyzer:
         self.loader = EntraDataLoader(logger)
         self.extractor = EntraFieldExtractor()
         self.baseline_calculator = BaselineCalculator(logger)
-        self.travel_detector = ImpossibleTravelDetector(logger)
+        self.travel_detector = ImpossibleTravelDetector(
+            logger,
+            max_speed_kmh=max_speed_kmh,
+            geoip_db_path=geoip_db_path,
+        )
         self.location_detector = NewLocationDetector(logger)
         self.device_detector = NewDeviceDetector(logger)
-        self.failure_detector = FailureSpikeDetector(logger)
+        self.failure_detector = FailureSpikeDetector(logger, threshold_sigma=z_score_threshold)
         self.compromise_identifier = FirstCompromiseIdentifier(logger)
         self.reporter = EntraReportGenerator(logger)
 
@@ -74,23 +88,29 @@ class EntraAnomalyAnalyzer:
 
     def analyze(
         self,
-        file_path: str | Path,
+        data: str | Path | DataFrame,
         user: str | None = None,
         filter_text: str | None = None,
         exclude_text: str | None = None,
-    ) -> None:
+    ) -> dict[str, Any]:
         """Run complete anomaly analysis on sign-in data.
 
         Args:
-            file_path: Path to JSON or CSV sign-in export.
+            data: Path to JSON/CSV sign-in export, or DataFrame with sign-in data.
             user: Optional specific user to analyze.
             filter_text: Optional text to filter sign-ins.
             exclude_text: Optional text to exclude sign-ins.
-        """
-        self.logger.info("Starting Entra anomaly analysis: %s", file_path)
 
-        # Load data
-        self.df = self.loader.load(file_path)
+        Returns:
+            Dictionary containing analysis results.
+        """
+        # Load data from file or use provided DataFrame
+        if isinstance(data, DataFrame):
+            self.logger.info("Starting Entra anomaly analysis on DataFrame")
+            self.df = data.copy()
+        else:
+            self.logger.info("Starting Entra anomaly analysis: %s", data)
+            self.df = self.loader.load(data)
 
         # Apply filters
         if filter_text:
@@ -146,6 +166,18 @@ class EntraAnomalyAnalyzer:
         )
 
         self.logger.info("Analysis complete")
+
+        # Return results as dictionary
+        return {
+            "df": self.df,
+            "baselines": self.baselines,
+            "travel_anomalies": self.travel_anomalies,
+            "location_anomalies": self.location_anomalies,
+            "device_anomalies": self.device_anomalies,
+            "failure_spikes": self.failure_spikes,
+            "ml_anomalies": self.ml_anomalies,
+            "compromises": self.compromises,
+        }
 
     def print_summary(self) -> None:
         """Print a summary of the analysis results."""

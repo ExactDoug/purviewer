@@ -51,8 +51,12 @@ def parse_arguments() -> argparse.Namespace:
         arg_width=40,
     )
 
-    # Positional argument for the audit CSV file
-    parser.add_argument("log_csv", help="CSV audit log from Purview (or Entra ID for --entra)")
+    # Positional argument for the audit CSV file (optional when using --web)
+    parser.add_argument(
+        "log_csv",
+        nargs="?",
+        help="CSV audit log from Purview (or Entra ID for --entra)",
+    )
 
     # SharePoint/Exchange analysis mode from Purview audit log
     purview_group = parser.add_argument_group(
@@ -211,7 +215,34 @@ def parse_arguments() -> argparse.Namespace:
         metavar="MAX_ROWS",
     )
 
+    # Web interface
+    web_group = parser.add_argument_group(
+        "WEB INTERFACE",
+        "Launch Gradio web interface for sign-in analysis",
+    )
+    web_group.add_argument(
+        "--web",
+        action="store_true",
+        help="launch Gradio web interface for Entra sign-in analysis",
+    )
+    web_group.add_argument(
+        "--web-port",
+        type=int,
+        default=7860,
+        help="port for web interface (default: 7860)",
+        metavar="PORT",
+    )
+    web_group.add_argument(
+        "--web-share",
+        action="store_true",
+        help="create a public share link for the web interface",
+    )
+
     args = parser.parse_args()
+
+    # Validate that log_csv is required unless using --web
+    if not args.web and not args.log_csv:
+        parser.error("log_csv is required unless using --web")
 
     # Validate that sign-in options are only used with --entra or --entra-anomalies
     signin_options = [args.filter, args.exclude, args.limit]
@@ -564,6 +595,13 @@ def main() -> None:
     """Parse a CSV audit log and analyze SharePoint file actions."""
     # Parse command-line arguments
     args = parse_arguments()
+
+    # Handle web interface launch
+    if args.web:
+        from purviewer.web import launch_app
+        print_color("Launching Gradio web interface...", "green")
+        launch_app(port=args.web_port, share=args.web_share)
+        return
 
     config.user_mapping = users.create_user_mapping(args.user_map)
 
