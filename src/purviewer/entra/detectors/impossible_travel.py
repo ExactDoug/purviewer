@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -71,15 +72,24 @@ class ImpossibleTravelDetector:
         df = df.sort_values("createdDateTime")
 
         # Check each user separately
+        total_skipped = 0
         for user in df["userPrincipalName"].unique():
             user_df = df[df["userPrincipalName"] == user].copy()
-            user_anomalies = self._detect_for_user(user, user_df)
+            user_anomalies, skipped = self._detect_for_user(user, user_df)
             anomalies.extend(user_anomalies)
+            total_skipped += skipped
 
-        self.logger.info("Detected %d impossible travel anomalies", len(anomalies))
+        if total_skipped > 0:
+            self.logger.info(
+                "Detected %d impossible travel anomalies (%d sign-in pairs skipped due to missing coordinates)",
+                len(anomalies),
+                total_skipped,
+            )
+        else:
+            self.logger.info("Detected %d impossible travel anomalies", len(anomalies))
         return anomalies
 
-    def _detect_for_user(self, user: str, df: DataFrame) -> list[TravelAnomaly]:
+    def _detect_for_user(self, user: str, df: DataFrame) -> tuple[list[TravelAnomaly], int]:
         """Detect impossible travel for a single user.
 
         Args:
@@ -87,13 +97,14 @@ class ImpossibleTravelDetector:
             df: DataFrame filtered to this user's sign-ins.
 
         Returns:
-            List of anomalies for this user.
+            Tuple of (anomalies list, skipped sign-in pairs count).
         """
         anomalies: list[TravelAnomaly] = []
 
         if len(df) < 2:
-            return anomalies
+            return anomalies, 0
 
+        skipped_count = 0
         for i in range(1, len(df)):
             prev = df.iloc[i - 1]
             curr = df.iloc[i]
@@ -103,6 +114,16 @@ class ImpossibleTravelDetector:
             curr_coords = self._get_coordinates_for_signin(curr)
 
             if prev_coords is None or curr_coords is None:
+                skipped_count += 1
+                self.logger.debug(
+                    "Skipping sign-in pair for %s: unable to determine coordinates "
+                    "(prev: %s/%s, curr: %s/%s)",
+                    user,
+                    prev.get("city", "Unknown"),
+                    prev.get("ipAddress", "Unknown"),
+                    curr.get("city", "Unknown"),
+                    curr.get("ipAddress", "Unknown"),
+                )
                 continue
 
             # Calculate distance using geopy
@@ -143,7 +164,14 @@ class ImpossibleTravelDetector:
                     required_speed,
                 )
 
-        return anomalies
+        if skipped_count > 0:
+            self.logger.debug(
+                "Skipped %d sign-in pairs for %s due to missing coordinates",
+                skipped_count,
+                user,
+            )
+
+        return anomalies, skipped_count
 
     def _get_coordinates_for_signin(self, row: dict) -> tuple[float, float] | None:
         """Get coordinates for a sign-in record.
@@ -166,8 +194,10 @@ class ImpossibleTravelDetector:
             try:
                 lat_f = float(lat)
                 lon_f = float(lon)
-                if lat_f != 0 or lon_f != 0:  # Skip (0, 0) which means unknown
-                    return (lat_f, lon_f)
+                # Validate coordinates are finite (not NaN or inf) and not (0, 0)
+                if math.isfinite(lat_f) and math.isfinite(lon_f):
+                    if lat_f != 0 or lon_f != 0:  # Skip (0, 0) which means unknown
+                        return (lat_f, lon_f)
             except (ValueError, TypeError):
                 pass
 
