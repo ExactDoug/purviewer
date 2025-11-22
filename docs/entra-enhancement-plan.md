@@ -376,9 +376,26 @@ dependencies = [
 
 ### v0.5.0 Commits
 - `feat(entra): add ML anomaly detection and GeoIP integration` - Full v0.5.0 features
+- `fix(entra): handle real Azure portal sign-in log field names` - Map riskLevelDuringSignIn/Aggregated to riskLevel
+- `fix(entra): use embedded geoCoordinates for impossible travel detection` - Extract lat/lon from location.geoCoordinates
 
 ### Branch
 - `feature/entra-anomaly-detection`
+
+---
+
+## Bug Fixes Applied
+
+### Real Entra ID Log Compatibility (v0.5.0)
+
+**Issue**: Real Azure portal exports use different field names than simplified test fixtures.
+
+**Fixes Applied**:
+1. **Risk fields**: Map `riskLevelDuringSignIn` and `riskLevelAggregated` to unified `riskLevel` column
+2. **GeoCoordinates**: Extract embedded `location.geoCoordinates.latitude/longitude` for accurate distance calculations
+3. **Hidden values**: Convert `"hidden"` risk values to `"none"`
+
+**Result**: Successfully tested with 111 real sign-in records, detecting 27 impossible travel and 20 new location anomalies.
 
 ---
 
