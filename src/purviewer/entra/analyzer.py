@@ -18,6 +18,7 @@ from purviewer.entra.detectors import (
 )
 from purviewer.entra.field_extractor import EntraFieldExtractor
 from purviewer.entra.first_compromise import CompromiseCandidate, FirstCompromiseIdentifier
+from purviewer.entra.ml import AnomalyDetector
 from purviewer.entra.reporting import EntraReportGenerator
 
 if TYPE_CHECKING:
@@ -29,14 +30,21 @@ if TYPE_CHECKING:
     from purviewer.entra.detectors.impossible_travel import TravelAnomaly
     from purviewer.entra.detectors.new_device import DeviceAnomaly
     from purviewer.entra.detectors.new_location import LocationAnomaly
+    from purviewer.entra.ml.anomaly_model import MLAnomaly
 
 
 class EntraAnomalyAnalyzer:
     """Main analyzer for Entra sign-in anomaly detection."""
 
-    def __init__(self, logger: Logger) -> None:
-        """Initialize the analyzer with all components."""
+    def __init__(self, logger: Logger, enable_ml: bool = False) -> None:
+        """Initialize the analyzer with all components.
+
+        Args:
+            logger: Logger instance.
+            enable_ml: Enable ML-based anomaly detection.
+        """
         self.logger = logger
+        self._enable_ml = enable_ml
 
         # Initialize components
         self.loader = EntraDataLoader(logger)
@@ -49,6 +57,11 @@ class EntraAnomalyAnalyzer:
         self.compromise_identifier = FirstCompromiseIdentifier(logger)
         self.reporter = EntraReportGenerator(logger)
 
+        # ML detector (optional)
+        self.ml_detector: AnomalyDetector | None = None
+        if enable_ml:
+            self.ml_detector = AnomalyDetector(logger)
+
         # Analysis results
         self.df: DataFrame | None = None
         self.baselines: dict[str, UserBaseline] = {}
@@ -56,6 +69,7 @@ class EntraAnomalyAnalyzer:
         self.location_anomalies: list[LocationAnomaly] = []
         self.device_anomalies: list[DeviceAnomaly] = []
         self.failure_spikes: list[FailureSpike] = []
+        self.ml_anomalies: list[MLAnomaly] = []
         self.compromises: dict[str, CompromiseCandidate | None] = {}
 
     def analyze(
@@ -118,6 +132,10 @@ class EntraAnomalyAnalyzer:
         self.device_anomalies = self.device_detector.detect(self.df, self.baselines)
         self.failure_spikes = self.failure_detector.detect(self.df)
 
+        # Run ML detection if enabled
+        if self.ml_detector:
+            self.ml_anomalies = self.ml_detector.detect(self.df, user)
+
         # Identify compromises
         self.compromises = self.compromise_identifier.identify(
             self.df,
@@ -154,12 +172,15 @@ class EntraAnomalyAnalyzer:
         print(f"  New Locations: {len(self.location_anomalies)}")
         print(f"  New Devices: {len(self.device_anomalies)}")
         print(f"  Failure Spikes: {len(self.failure_spikes)}")
+        if self._enable_ml:
+            print(f"  ML-Detected: {len(self.ml_anomalies)}")
 
         total = (
             len(self.travel_anomalies)
             + len(self.location_anomalies)
             + len(self.device_anomalies)
             + len(self.failure_spikes)
+            + len(self.ml_anomalies)
         )
 
         # First compromise
@@ -219,4 +240,32 @@ class EntraAnomalyAnalyzer:
             self.location_anomalies,
             self.device_anomalies,
             self.failure_spikes,
+        )
+
+    def generate_json_report(
+        self,
+        output_path: str | Path,
+        user: str | None = None,
+    ) -> None:
+        """Generate a JSON report.
+
+        Args:
+            output_path: Path to write the JSON report.
+            user: Optional specific user for the report.
+        """
+        if self.df is None:
+            self.logger.error("No analysis data - run analyze() first")
+            return
+
+        self.reporter.generate_json(
+            output_path,
+            self.df,
+            self.baselines,
+            self.travel_anomalies,
+            self.location_anomalies,
+            self.device_anomalies,
+            self.failure_spikes,
+            self.compromises,
+            self.ml_anomalies if self._enable_ml else None,
+            user,
         )

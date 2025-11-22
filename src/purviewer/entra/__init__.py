@@ -20,9 +20,12 @@ from .detectors import (
 from .entra_ops import EntraSignInOperations
 from .field_extractor import EntraFieldExtractor
 from .first_compromise import CompromiseCandidate, FirstCompromiseIdentifier
+from .geoip import GeoIPService
+from .ml import AnomalyDetector, FeatureEngineer
 from .reporting import EntraReportGenerator
 
 __all__ = [
+    "AnomalyDetector",
     "BaselineCalculator",
     "CompromiseCandidate",
     "EntraAnomalyAnalyzer",
@@ -31,7 +34,9 @@ __all__ = [
     "EntraReportGenerator",
     "EntraSignInOperations",
     "FailureSpikeDetector",
+    "FeatureEngineer",
     "FirstCompromiseIdentifier",
+    "GeoIPService",
     "ImpossibleTravelDetector",
     "NewDeviceDetector",
     "NewLocationDetector",

@@ -5,9 +5,10 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pandas import DataFrame
 
@@ -20,6 +21,8 @@ from purviewer.entra.first_compromise import CompromiseCandidate
 
 if TYPE_CHECKING:
     from logging import Logger
+
+    from purviewer.entra.ml.anomaly_model import MLAnomaly
 
 
 class EntraReportGenerator:
@@ -274,3 +277,172 @@ class EntraReportGenerator:
         export_df = pd.DataFrame(rows)
         export_df.to_csv(output_path, index=False)
         self.logger.info("Anomalies exported to CSV: %s (%d rows)", output_path, len(rows))
+
+    def generate_json(
+        self,
+        output_path: str | Path,
+        df: DataFrame,
+        baselines: dict[str, UserBaseline],
+        travel_anomalies: list[TravelAnomaly],
+        location_anomalies: list[LocationAnomaly],
+        device_anomalies: list[DeviceAnomaly],
+        failure_spikes: list[FailureSpike],
+        compromises: dict[str, CompromiseCandidate | None],
+        ml_anomalies: list[MLAnomaly] | None = None,
+        user: str | None = None,
+    ) -> None:
+        """Generate a JSON report for programmatic consumption.
+
+        Args:
+            output_path: Path to write the JSON report.
+            df: DataFrame with sign-in data.
+            baselines: User baselines.
+            travel_anomalies: Impossible travel detections.
+            location_anomalies: New location detections.
+            device_anomalies: New device detections.
+            failure_spikes: Failure spike detections.
+            compromises: First compromise candidates.
+            ml_anomalies: ML-detected anomalies.
+            user: Optional specific user to report on.
+        """
+        report: dict[str, Any] = {
+            "metadata": {
+                "generated": datetime.now().isoformat(),
+                "version": "1.0",
+                "user_filter": user,
+            },
+            "summary": {},
+            "baselines": {},
+            "anomalies": {
+                "impossible_travel": [],
+                "new_location": [],
+                "new_device": [],
+                "failure_spike": [],
+                "ml_detected": [],
+            },
+            "compromises": {},
+        }
+
+        # Summary
+        if not df.empty:
+            report["metadata"]["analysis_period"] = {
+                "start": str(df["createdDateTime"].min()),
+                "end": str(df["createdDateTime"].max()),
+            }
+            report["metadata"]["total_signins"] = len(df)
+
+        total_anomalies = (
+            len(travel_anomalies)
+            + len(location_anomalies)
+            + len(device_anomalies)
+            + len(failure_spikes)
+            + (len(ml_anomalies) if ml_anomalies else 0)
+        )
+
+        high_confidence = [c for c in compromises.values() if c and c.confidence == "high"]
+
+        report["summary"] = {
+            "total_anomalies": total_anomalies,
+            "impossible_travel_count": len(travel_anomalies),
+            "new_location_count": len(location_anomalies),
+            "new_device_count": len(device_anomalies),
+            "failure_spike_count": len(failure_spikes),
+            "ml_anomaly_count": len(ml_anomalies) if ml_anomalies else 0,
+            "high_confidence_compromises": len(high_confidence),
+            "users_analyzed": len(baselines),
+        }
+
+        # Baselines
+        for upn, baseline in baselines.items():
+            report["baselines"][upn] = {
+                "sign_in_count": baseline.sign_in_count,
+                "ip_addresses": baseline.ip_addresses[:10],
+                "countries": baseline.countries,
+                "cities": baseline.cities[:10],
+                "operating_systems": baseline.operating_systems,
+                "browsers": baseline.browsers,
+                "client_apps": baseline.client_apps,
+                "risk_levels": baseline.risk_levels,
+                "first_seen": str(baseline.first_seen) if baseline.first_seen else None,
+                "last_seen": str(baseline.last_seen) if baseline.last_seen else None,
+            }
+
+        # Impossible travel anomalies
+        for a in travel_anomalies:
+            report["anomalies"]["impossible_travel"].append({
+                "user": a.user,
+                "from_time": a.from_time,
+                "to_time": a.to_time,
+                "from_location": a.from_location,
+                "to_location": a.to_location,
+                "from_ip": a.from_ip,
+                "to_ip": a.to_ip,
+                "distance_km": a.distance_km,
+                "time_hours": a.time_hours,
+                "required_speed_kmh": a.required_speed_kmh,
+            })
+
+        # New location anomalies
+        for a in location_anomalies:
+            report["anomalies"]["new_location"].append({
+                "user": a.user,
+                "timestamp": a.timestamp,
+                "ip_address": a.ip_address,
+                "country": a.country,
+                "city": a.city,
+                "anomaly_type": a.anomaly_type,
+                "is_risky": a.is_risky,
+            })
+
+        # New device anomalies
+        for a in device_anomalies:
+            report["anomalies"]["new_device"].append({
+                "user": a.user,
+                "timestamp": a.timestamp,
+                "ip_address": a.ip_address,
+                "operating_system": a.operating_system,
+                "browser": a.browser,
+                "is_managed": a.is_managed,
+                "is_compliant": a.is_compliant,
+                "is_risky": a.is_risky,
+            })
+
+        # Failure spikes
+        for s in failure_spikes:
+            report["anomalies"]["failure_spike"].append({
+                "user": s.user,
+                "date": s.date,
+                "failure_count": s.failure_count,
+                "average_failures": s.average_failures,
+                "z_score": s.z_score,
+                "ip_addresses": s.ip_addresses,
+                "error_codes": s.error_codes,
+            })
+
+        # ML anomalies
+        if ml_anomalies:
+            for a in ml_anomalies:
+                report["anomalies"]["ml_detected"].append({
+                    "user": a.user,
+                    "timestamp": a.timestamp,
+                    "ip_address": a.ip_address,
+                    "anomaly_score": a.anomaly_score,
+                    "contributing_factors": a.contributing_factors,
+                })
+
+        # Compromises
+        for upn, candidate in compromises.items():
+            if candidate:
+                report["compromises"][upn] = {
+                    "timestamp": candidate.timestamp,
+                    "ip_address": candidate.ip_address,
+                    "location": candidate.location,
+                    "risk_level": candidate.risk_level,
+                    "confidence": candidate.confidence,
+                    "reason": candidate.reason,
+                }
+
+        # Write JSON
+        path = Path(output_path)
+        path.write_text(json.dumps(report, indent=2))
+        self.logger.info("JSON report generated: %s", path)

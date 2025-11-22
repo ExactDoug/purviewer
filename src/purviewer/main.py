@@ -182,6 +182,17 @@ def parse_arguments() -> argparse.Namespace:
         metavar="OUTPUT_FILE",
     )
     entra_group.add_argument(
+        "--entra-ml-detect",
+        action="store_true",
+        help="enable ML-based anomaly detection (Isolation Forest)",
+    )
+    entra_group.add_argument(
+        "--entra-report-json",
+        type=str,
+        help="generate JSON report for programmatic consumption",
+        metavar="OUTPUT_FILE",
+    )
+    entra_group.add_argument(
         "--filter",
         type=str,
         help="filter sign-ins by specified text (case-insensitive)",
@@ -209,9 +220,16 @@ def parse_arguments() -> argparse.Namespace:
         parser.error("Sign-in options (--filter, --exclude, --limit) can only be used with --entra or --entra-anomalies")
 
     # Validate anomaly-specific options
-    anomaly_options = [args.entra_user, args.entra_report_md, args.entra_export_anomalies]
-    if any(opt is not None for opt in anomaly_options) and not args.entra_anomalies:
-        parser.error("Anomaly options (--entra-user, --entra-report-md, --entra-export-anomalies) require --entra-anomalies")
+    anomaly_options = [
+        args.entra_user,
+        args.entra_report_md,
+        args.entra_export_anomalies,
+        args.entra_ml_detect,
+        args.entra_report_json,
+    ]
+    anomaly_option_names = "--entra-user, --entra-report-md, --entra-export-anomalies, --entra-ml-detect, --entra-report-json"
+    if any(opt for opt in anomaly_options) and not args.entra_anomalies:
+        parser.error(f"Anomaly options ({anomaly_option_names}) require --entra-anomalies")
 
     return args
 
@@ -555,7 +573,7 @@ def main() -> None:
     # Handle Entra anomaly detection
     if args.entra_anomalies:
         try:
-            analyzer = EntraAnomalyAnalyzer(logger)
+            analyzer = EntraAnomalyAnalyzer(logger, enable_ml=args.entra_ml_detect)
             analyzer.analyze(
                 args.log_csv,
                 user=args.entra_user,
@@ -569,6 +587,9 @@ def main() -> None:
             # Generate reports if requested
             if args.entra_report_md:
                 analyzer.generate_report(args.entra_report_md, user=args.entra_user)
+
+            if args.entra_report_json:
+                analyzer.generate_json_report(args.entra_report_json, user=args.entra_user)
 
             if args.entra_export_anomalies:
                 analyzer.export_anomalies(args.entra_export_anomalies)

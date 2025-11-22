@@ -6,38 +6,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pandas import DataFrame
 
+from purviewer.entra.geoip import GeoIPService
+
 if TYPE_CHECKING:
     from logging import Logger
-
-
-# Approximate coordinates for major cities (simplified approach without GeoIP)
-# In production, use MaxMind GeoLite2 or similar
-CITY_COORDINATES: dict[str, tuple[float, float]] = {
-    "Seattle": (47.6062, -122.3321),
-    "New York": (40.7128, -74.0060),
-    "Los Angeles": (34.0522, -118.2437),
-    "Chicago": (41.8781, -87.6298),
-    "Houston": (29.7604, -95.3698),
-    "Phoenix": (33.4484, -112.0740),
-    "Philadelphia": (39.9526, -75.1652),
-    "San Antonio": (29.4241, -98.4936),
-    "San Diego": (32.7157, -117.1611),
-    "Dallas": (32.7767, -96.7970),
-    "London": (51.5074, -0.1278),
-    "Paris": (48.8566, 2.3522),
-    "Berlin": (52.5200, 13.4050),
-    "Moscow": (55.7558, 37.6173),
-    "Tokyo": (35.6762, 139.6503),
-    "Beijing": (39.9042, 116.4074),
-    "Sydney": (-33.8688, 151.2093),
-    "Toronto": (43.6532, -79.3832),
-    "Mumbai": (19.0760, 72.8777),
-    "Dubai": (25.2048, 55.2708),
-}
 
 
 @dataclass
@@ -59,15 +36,22 @@ class TravelAnomaly:
 class ImpossibleTravelDetector:
     """Detect impossible travel based on geographic distance and time."""
 
-    def __init__(self, logger: Logger, max_speed_kmh: int = 900) -> None:
+    def __init__(
+        self,
+        logger: Logger,
+        max_speed_kmh: int = 900,
+        geoip_db_path: str | Path | None = None,
+    ) -> None:
         """Initialize the detector.
 
         Args:
             logger: Logger instance.
             max_speed_kmh: Maximum realistic travel speed in km/h (default: 900, commercial flight).
+            geoip_db_path: Optional path to MaxMind GeoLite2-City database.
         """
         self.logger = logger
         self.max_speed_kmh = max_speed_kmh
+        self._geoip = GeoIPService(logger, geoip_db_path)
 
     def detect(self, df: DataFrame) -> list[TravelAnomaly]:
         """Detect impossible travel anomalies.
@@ -114,15 +98,15 @@ class ImpossibleTravelDetector:
             prev = df.iloc[i - 1]
             curr = df.iloc[i]
 
-            # Get coordinates for both locations
-            prev_coords = self._get_coordinates(prev.get("city"))
-            curr_coords = self._get_coordinates(curr.get("city"))
+            # Get coordinates - try IP first, then city
+            prev_coords = self._get_coordinates_for_signin(prev)
+            curr_coords = self._get_coordinates_for_signin(curr)
 
             if prev_coords is None or curr_coords is None:
                 continue
 
-            # Calculate distance
-            distance_km = self._haversine_distance(prev_coords, curr_coords)
+            # Calculate distance using geopy
+            distance_km = self._geoip.calculate_distance(prev_coords, curr_coords)
 
             # Calculate time difference
             time_diff = curr["createdDateTime"] - prev["createdDateTime"]
@@ -161,52 +145,34 @@ class ImpossibleTravelDetector:
 
         return anomalies
 
-    def _get_coordinates(self, city: str | None) -> tuple[float, float] | None:
-        """Get coordinates for a city.
+    def _get_coordinates_for_signin(self, row: dict) -> tuple[float, float] | None:
+        """Get coordinates for a sign-in record.
+
+        Tries IP geolocation first, then falls back to city name lookup.
 
         Args:
-            city: City name.
+            row: Sign-in record with ipAddress and city fields.
 
         Returns:
             (latitude, longitude) tuple or None if not found.
         """
-        if not city:
-            return None
+        # Try IP-based lookup first (most accurate)
+        ip = row.get("ipAddress")
+        if ip:
+            coords = self._geoip.get_coordinates(ip)
+            if coords:
+                return coords
 
-        # Check our simple lookup table
-        return CITY_COORDINATES.get(city)
+        # Fall back to city name lookup
+        city = row.get("city")
+        country = row.get("country")
+        if city:
+            coords = GeoIPService.get_city_coordinates(city, country)
+            if coords:
+                return coords
 
-    def _haversine_distance(
-        self, coord1: tuple[float, float], coord2: tuple[float, float]
-    ) -> float:
-        """Calculate the Haversine distance between two points.
+        return None
 
-        Args:
-            coord1: (latitude, longitude) of first point.
-            coord2: (latitude, longitude) of second point.
-
-        Returns:
-            Distance in kilometers.
-        """
-        import math
-
-        lat1, lon1 = coord1
-        lat2, lon2 = coord2
-
-        # Earth's radius in kilometers
-        R = 6371.0
-
-        # Convert to radians
-        lat1_rad = math.radians(lat1)
-        lat2_rad = math.radians(lat2)
-        dlat = math.radians(lat2 - lat1)
-        dlon = math.radians(lon2 - lon1)
-
-        # Haversine formula
-        a = (
-            math.sin(dlat / 2) ** 2
-            + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon / 2) ** 2
-        )
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-        return R * c
+    def close(self) -> None:
+        """Close any open resources."""
+        self._geoip.close()
