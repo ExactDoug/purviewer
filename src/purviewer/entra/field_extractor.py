@@ -56,6 +56,8 @@ class EntraFieldExtractor:
             df["country"] = None
             df["city"] = None
             df["state"] = None
+            df["latitude"] = None
+            df["longitude"] = None
             return df
 
         df["country"] = df["location"].apply(
@@ -63,6 +65,14 @@ class EntraFieldExtractor:
         )
         df["city"] = df["location"].apply(lambda x: self._safe_get(x, "city"))
         df["state"] = df["location"].apply(lambda x: self._safe_get(x, "state"))
+
+        # Extract geoCoordinates (real Entra ID logs include lat/lon)
+        df["latitude"] = df["location"].apply(
+            lambda x: self._safe_get_nested(x, "geoCoordinates", "latitude")
+        )
+        df["longitude"] = df["location"].apply(
+            lambda x: self._safe_get_nested(x, "geoCoordinates", "longitude")
+        )
 
         return df
 
@@ -162,3 +172,19 @@ class EntraFieldExtractor:
             return obj.get(key)
 
         return None
+
+    def _safe_get_nested(self, obj: Any, key1: str, key2: str) -> Any:
+        """Safely get a nested value from a dict.
+
+        Args:
+            obj: Dictionary, JSON string, or None.
+            key1: First level key.
+            key2: Second level key.
+
+        Returns:
+            Value or None if not found.
+        """
+        nested = self._safe_get(obj, key1)
+        if nested is None:
+            return None
+        return self._safe_get(nested, key2)

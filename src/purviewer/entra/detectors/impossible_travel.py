@@ -148,15 +148,30 @@ class ImpossibleTravelDetector:
     def _get_coordinates_for_signin(self, row: dict) -> tuple[float, float] | None:
         """Get coordinates for a sign-in record.
 
-        Tries IP geolocation first, then falls back to city name lookup.
+        Priority order:
+        1. Embedded lat/lon from Entra ID logs (most accurate)
+        2. IP-based geolocation (if MaxMind database available)
+        3. City name lookup (fallback)
 
         Args:
-            row: Sign-in record with ipAddress and city fields.
+            row: Sign-in record with latitude, longitude, ipAddress, city fields.
 
         Returns:
             (latitude, longitude) tuple or None if not found.
         """
-        # Try IP-based lookup first (most accurate)
+        # Try embedded coordinates first (real Entra ID logs have these)
+        lat = row.get("latitude")
+        lon = row.get("longitude")
+        if lat is not None and lon is not None:
+            try:
+                lat_f = float(lat)
+                lon_f = float(lon)
+                if lat_f != 0 or lon_f != 0:  # Skip (0, 0) which means unknown
+                    return (lat_f, lon_f)
+            except (ValueError, TypeError):
+                pass
+
+        # Try IP-based lookup (if MaxMind database available)
         ip = row.get("ipAddress")
         if ip:
             coords = self._geoip.get_coordinates(ip)
